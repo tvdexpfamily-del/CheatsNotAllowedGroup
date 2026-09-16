@@ -4,43 +4,49 @@ local RunService = game:GetService("RunService")
 local localPlayer = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
--- === СОСТОЯНИЕ СИСТЕМЫ ===
+-- === КОНФИГУРАЦИЯ ===
+local CONFIG = {
+	IS_FPS_MODE = false, -- ПОСТАВЬ true, если тестируешь в шутере от первого лица
+	TPS_OFFSET = Vector3.new(0, 5, 15), -- Смещение для 3-го лица (X, Y вверх, Z назад)
+	FPS_OFFSET = Vector3.new(0, 0, 0)   -- Смещение для 1-го лица (прямо в голове)
+}
+
 local isLocked = false
 local targetPlayer = nil
 
--- === СОЗДАНИЕ UI (Чёрная квадратная кнопка слева) ===
+-- === СОЗДАНИЕ UI (С максимальным приоритетом отображения) ===
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "LockOnGui"
 screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 99999 -- КРИТИЧЕСКИ ВАЖНО: Делает GUI поверх всех остальных
 screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 
 local lockButton = Instance.new("TextButton")
 lockButton.Name = "LockButton"
-lockButton.Size = UDim2.new(0, 64, 0, 64) -- Квадратная
-lockButton.Position = UDim2.new(0, 20, 0.5, -32) -- Слева по центру
-lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Чёрный
+lockButton.Size = UDim2.new(0, 64, 0, 64)
+lockButton.Position = UDim2.new(0, 20, 0.5, -32)
+lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 lockButton.BorderSizePixel = 0
-lockButton.Text = "OFF" -- Начальное состояние
+lockButton.Text = "OFF"
 lockButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 lockButton.Font = Enum.Font.GothamBold
 lockButton.TextSize = 16
+lockButton.ZIndex = 100 -- Дополнительная защита Z-индекса для самой кнопки
 lockButton.Parent = screenGui
 
--- Иконка прицела поверх кнопки
 local crosshairIcon = Instance.new("ImageLabel")
 crosshairIcon.Size = UDim2.new(0.8, 0, 0.8, 0)
 crosshairIcon.Position = UDim2.new(0.1, 0, 0.1, 0)
 crosshairIcon.BackgroundTransparency = 1
 crosshairIcon.Image = "rbxasset://textures/ui/GameBasic/Circle.png"
 crosshairIcon.ImageColor3 = Color3.fromRGB(255, 50, 50)
+crosshairIcon.ZIndex = 101
 crosshairIcon.Parent = lockButton
 
 -- === ФУНКЦИЯ ПОИСКА БЛИЖАЙШЕГО ИГРОКА ===
 local function findClosestPlayer()
 	local myCharacter = localPlayer.Character
-	if not myCharacter or not myCharacter:FindFirstChild("HumanoidRootPart") then 
-		return nil 
-	end
+	if not myCharacter or not myCharacter:FindFirstChild("HumanoidRootPart") then return nil end
 
 	local closestPlayer = nil
 	local minDistance = math.huge
@@ -62,17 +68,15 @@ local function findClosestPlayer()
 	return closestPlayer
 end
 
--- === ОБРАБОТКА НАЖАТИЙ (Toggle: клик вкл, клик выкл) ===
+-- === ОБРАБОТКА НАЖАТИЙ ===
 lockButton.MouseButton1Click:Connect(function()
 	if isLocked then
-		-- ВЫКЛЮЧЕНИЕ
 		isLocked = false
 		targetPlayer = nil
 		camera.CameraType = Enum.CameraType.Custom
 		lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 		lockButton.Text = "OFF"
 	else
-		-- ВКЛЮЧЕНИЕ
 		targetPlayer = findClosestPlayer()
 		if targetPlayer then
 			isLocked = true
@@ -89,6 +93,7 @@ RunService.RenderStepped:Connect(function()
 	if not myCharacter then return end
 	
 	local myRoot = myCharacter:FindFirstChild("HumanoidRootPart")
+	local myHead = myCharacter:FindFirstChild("Head") or myRoot -- Для FPS берем голову
 	if not myRoot then return end
 
 	if isLocked and targetPlayer then
@@ -98,21 +103,23 @@ RunService.RenderStepped:Connect(function()
 			local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
 			local targetPos = targetHead or targetRoot
 			
-			if targetPos and myRoot then
-				-- Вычисляем позицию камеры относительно персонажа
-				local cameraOffset = Vector3.new(0, 5, 15)
-				local desiredCameraPos = myRoot.Position + myRoot.CFrame:VectorToWorldSpace(cameraOffset)
+			if targetPos then
+				-- Выбираем базовую часть и смещение в зависимости от режима
+				local basePart = CONFIG.IS_FPS_MODE and myHead or myRoot
+				local offset = CONFIG.IS_FPS_MODE and CONFIG.FPS_OFFSET or CONFIG.TPS_OFFSET
 				
-				-- Защита от камеры под землёй (минимальная высота 3 студа)
-				if desiredCameraPos.Y < 3 then
-					desiredCameraPos = Vector3.new(desiredCameraPos.X, 3, desiredCameraPos.Z)
+				local desiredCameraPos = basePart.Position + basePart.CFrame:VectorToWorldSpace(offset)
+				
+				-- Защита от камеры под землей (для FPS порог ниже)
+				local minY = CONFIG.IS_FPS_MODE and 1.5 or 3
+				if desiredCameraPos.Y < minY then
+					desiredCameraPos = Vector3.new(desiredCameraPos.X, minY, desiredCameraPos.Z)
 				end
 				
-				-- Направляем камеру на цель
+				-- Применяем поворот камеры на цель
 				camera.CFrame = CFrame.lookAt(desiredCameraPos, targetPos.Position)
 			end
 		else
-			-- Цель исчезла (умерла или вышла) — сбрасываем захват
 			isLocked = false
 			targetPlayer = nil
 			camera.CameraType = Enum.CameraType.Custom
