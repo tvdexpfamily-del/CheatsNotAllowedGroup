@@ -1,0 +1,123 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local localPlayer = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- === СОСТОЯНИЕ СИСТЕМЫ ===
+local isLocked = false
+local targetPlayer = nil
+
+-- === СОЗДАНИЕ UI (Чёрная квадратная кнопка слева) ===
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "LockOnGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+local lockButton = Instance.new("TextButton")
+lockButton.Name = "LockButton"
+lockButton.Size = UDim2.new(0, 64, 0, 64) -- Квадратная
+lockButton.Position = UDim2.new(0, 20, 0.5, -32) -- Слева по центру
+lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Чёрный
+lockButton.BorderSizePixel = 0
+lockButton.Text = "OFF" -- Начальное состояние
+lockButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+lockButton.Font = Enum.Font.GothamBold
+lockButton.TextSize = 16
+lockButton.Parent = screenGui
+
+-- Иконка прицела поверх кнопки
+local crosshairIcon = Instance.new("ImageLabel")
+crosshairIcon.Size = UDim2.new(0.8, 0, 0.8, 0)
+crosshairIcon.Position = UDim2.new(0.1, 0, 0.1, 0)
+crosshairIcon.BackgroundTransparency = 1
+crosshairIcon.Image = "rbxasset://textures/ui/GameBasic/Circle.png"
+crosshairIcon.ImageColor3 = Color3.fromRGB(255, 50, 50)
+crosshairIcon.Parent = lockButton
+
+-- === ФУНКЦИЯ ПОИСКА БЛИЖАЙШЕГО ИГРОКА ===
+local function findClosestPlayer()
+	local myCharacter = localPlayer.Character
+	if not myCharacter or not myCharacter:FindFirstChild("HumanoidRootPart") then 
+		return nil 
+	end
+
+	local closestPlayer = nil
+	local minDistance = math.huge
+
+	for _, player in pairs(Players:GetPlayers()) do
+		if player ~= localPlayer and player.Character then
+			local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
+			local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+			
+			if targetRoot and humanoid and humanoid.Health > 0 then
+				local distance = (targetRoot.Position - myCharacter.HumanoidRootPart.Position).Magnitude
+				if distance < minDistance then
+					minDistance = distance
+					closestPlayer = player
+				end
+			end
+		end
+	end
+	return closestPlayer
+end
+
+-- === ОБРАБОТКА НАЖАТИЙ (Toggle: клик вкл, клик выкл) ===
+lockButton.MouseButton1Click:Connect(function()
+	if isLocked then
+		-- ВЫКЛЮЧЕНИЕ
+		isLocked = false
+		targetPlayer = nil
+		camera.CameraType = Enum.CameraType.Custom
+		lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		lockButton.Text = "OFF"
+	else
+		-- ВКЛЮЧЕНИЕ
+		targetPlayer = findClosestPlayer()
+		if targetPlayer then
+			isLocked = true
+			camera.CameraType = Enum.CameraType.Scriptable
+			lockButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+			lockButton.Text = "ON"
+		end
+	end
+end)
+
+-- === ЦИКЛ ОБНОВЛЕНИЯ КАМЕРЫ ===
+RunService.RenderStepped:Connect(function()
+	local myCharacter = localPlayer.Character
+	if not myCharacter then return end
+	
+	local myRoot = myCharacter:FindFirstChild("HumanoidRootPart")
+	if not myRoot then return end
+
+	if isLocked and targetPlayer then
+		local targetCharacter = targetPlayer.Character
+		if targetCharacter then
+			local targetHead = targetCharacter:FindFirstChild("Head")
+			local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
+			local targetPos = targetHead or targetRoot
+			
+			if targetPos and myRoot then
+				-- Вычисляем позицию камеры относительно персонажа
+				local cameraOffset = Vector3.new(0, 5, 15)
+				local desiredCameraPos = myRoot.Position + myRoot.CFrame:VectorToWorldSpace(cameraOffset)
+				
+				-- Защита от камеры под землёй (минимальная высота 3 студа)
+				if desiredCameraPos.Y < 3 then
+					desiredCameraPos = Vector3.new(desiredCameraPos.X, 3, desiredCameraPos.Z)
+				end
+				
+				-- Направляем камеру на цель
+				camera.CFrame = CFrame.lookAt(desiredCameraPos, targetPos.Position)
+			end
+		else
+			-- Цель исчезла (умерла или вышла) — сбрасываем захват
+			isLocked = false
+			targetPlayer = nil
+			camera.CameraType = Enum.CameraType.Custom
+			lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+			lockButton.Text = "OFF"
+		end
+	end
+end)
