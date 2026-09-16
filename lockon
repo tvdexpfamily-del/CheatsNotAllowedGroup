@@ -4,13 +4,6 @@ local RunService = game:GetService("RunService")
 local localPlayer = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
--- === КОНФИГУРАЦИЯ ===
-local CONFIG = {
-	IS_FPS_MODE = false, -- ПОСТАВЬ true, если тестируешь в шутере от первого лица
-	TPS_OFFSET = Vector3.new(0, 5, 15), -- Смещение для 3-го лица (X, Y вверх, Z назад)
-	FPS_OFFSET = Vector3.new(0, 0, 0)   -- Смещение для 1-го лица (прямо в голове)
-}
-
 local isLocked = false
 local targetPlayer = nil
 
@@ -18,20 +11,20 @@ local targetPlayer = nil
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "LockOnGui"
 screenGui.ResetOnSpawn = false
-screenGui.DisplayOrder = 99999 -- КРИТИЧЕСКИ ВАЖНО: Делает GUI поверх всех остальных
+screenGui.DisplayOrder = 99999 -- Поверх всех остальных GUI
 screenGui.Parent = localPlayer:WaitForChild("PlayerGui")
 
 local lockButton = Instance.new("TextButton")
 lockButton.Name = "LockButton"
 lockButton.Size = UDim2.new(0, 64, 0, 64)
-lockButton.Position = UDim2.new(0, 20, 0.5, -32)
+lockButton.Position = UDim2.new(0, 20, 0.5, -32) -- Слева по центру
 lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 lockButton.BorderSizePixel = 0
 lockButton.Text = "OFF"
 lockButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 lockButton.Font = Enum.Font.GothamBold
 lockButton.TextSize = 16
-lockButton.ZIndex = 100 -- Дополнительная защита Z-индекса для самой кнопки
+lockButton.ZIndex = 100
 lockButton.Parent = screenGui
 
 local crosshairIcon = Instance.new("ImageLabel")
@@ -68,7 +61,7 @@ local function findClosestPlayer()
 	return closestPlayer
 end
 
--- === ОБРАБОТКА НАЖАТИЙ ===
+-- === ОБРАБОТКА НАЖАТИЙ (Toggle) ===
 lockButton.MouseButton1Click:Connect(function()
 	if isLocked then
 		isLocked = false
@@ -87,44 +80,57 @@ lockButton.MouseButton1Click:Connect(function()
 	end
 end)
 
--- === ЦИКЛ ОБНОВЛЕНИЯ КАМЕРЫ ===
-RunService.RenderStepped:Connect(function()
-	local myCharacter = localPlayer.Character
-	if not myCharacter then return end
-	
-	local myRoot = myCharacter:FindFirstChild("HumanoidRootPart")
-	local myHead = myCharacter:FindFirstChild("Head") or myRoot -- Для FPS берем голову
-	if not myRoot then return end
-
-	if isLocked and targetPlayer then
-		local targetCharacter = targetPlayer.Character
-		if targetCharacter then
-			local targetHead = targetCharacter:FindFirstChild("Head")
-			local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
-			local targetPos = targetHead or targetRoot
-			
-			if targetPos then
-				-- Выбираем базовую часть и смещение в зависимости от режима
-				local basePart = CONFIG.IS_FPS_MODE and myHead or myRoot
-				local offset = CONFIG.IS_FPS_MODE and CONFIG.FPS_OFFSET or CONFIG.TPS_OFFSET
-				
-				local desiredCameraPos = basePart.Position + basePart.CFrame:VectorToWorldSpace(offset)
-				
-				-- Защита от камеры под землей (для FPS порог ниже)
-				local minY = CONFIG.IS_FPS_MODE and 1.5 or 3
-				if desiredCameraPos.Y < minY then
-					desiredCameraPos = Vector3.new(desiredCameraPos.X, minY, desiredCameraPos.Z)
-				end
-				
-				-- Применяем поворот камеры на цель
-				camera.CFrame = CFrame.lookAt(desiredCameraPos, targetPos.Position)
-			end
-		else
+-- === ОБРАБОТКА СМЕРТИ ИГРОКА (Сброс при смерти) ===
+local function onCharacterAdded(character)
+	local humanoid = character:WaitForChild("Humanoid")
+	humanoid.Died:Connect(function()
+		if isLocked then
 			isLocked = false
 			targetPlayer = nil
 			camera.CameraType = Enum.CameraType.Custom
 			lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 			lockButton.Text = "OFF"
 		end
+	end)
+end
+
+if localPlayer.Character then
+	onCharacterAdded(localPlayer.Character)
+end
+localPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+-- === ЦИКЛ ОБНОВЛЕНИЯ КАМЕРЫ (Как в первом скрипте) ===
+RunService.RenderStepped:Connect(function()
+	if not isLocked or not targetPlayer then return end
+
+	local targetCharacter = targetPlayer.Character
+	-- 1. Проверка: цель вышла из игры или персонаж удален
+	if not targetCharacter then
+		isLocked = false
+		targetPlayer = nil
+		camera.CameraType = Enum.CameraType.Custom
+		lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		lockButton.Text = "OFF"
+		return
+	end
+
+	local targetHumanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
+	-- 2. Проверка: цель умерла
+	if not targetHumanoid or targetHumanoid.Health <= 0 then
+		isLocked = false
+		targetPlayer = nil
+		camera.CameraType = Enum.CameraType.Custom
+		lockButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		lockButton.Text = "OFF"
+		return
+	end
+
+	local targetPos = targetCharacter:FindFirstChild("Head") or targetCharacter:FindFirstChild("HumanoidRootPart")
+	
+	if targetPos then
+		-- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Мы не меняем позицию камеры, мы только поворачиваем её!
+		-- Это идеально работает и в FPS, и в TPS, сохраняя родное расстояние камеры.
+		local currentCamPos = camera.CFrame.Position
+		camera.CFrame = CFrame.lookAt(currentCamPos, targetPos.Position)
 	end
 end)
